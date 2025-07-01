@@ -1,5 +1,8 @@
 //MILSZTAIN_MACIA_SABIN
 
+//API KEY: AIzaSyBSwN-5-gE6q-C40fdfLntIT9lXXuBDC0Q
+//DATABASE URL: https://esp32umbral-default-rtdb.firebaseio.com/
+
 //LIBRERIAS
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -65,6 +68,11 @@ void loop()
   //Se leen los botones
   val1 = digitalRead(SW1);
   val2 = digitalRead(SW2);
+
+  if (temp > umbral)
+  {
+    Serial.println("La temperatura supero al umbral");
+  }
 
   switch (ESTADO) //INICIO DE MÁQUINA DE ESTADOS
   {

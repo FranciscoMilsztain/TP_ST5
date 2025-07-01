@@ -1,0 +1,162 @@
+//MILSZTAIN_MACIA_SABIN
+
+//LIBRERIAS
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <DHT.h>
+
+//ESTADOS
+int ESTADO = 1;
+#define PANTALLA1 1
+#define PANTALLA2 2
+#define SOLTAR1 3
+#define SOLTAR_SUMAR 4
+#define SOLTAR_RESTAR 5
+#define SOLTAR2 6
+
+//TIMER
+unsigned long timer;
+unsigned long timer1000;
+int segs;
+
+//BOTONES
+#define SW1 34 //switch de aumento de horas
+int val1;
+#define SW2 35 //switch de aumento de minutos
+int val2;
+
+//PANTALLA
+#define LONGITUD 128 // longitud
+#define ALTURA 64 // altura
+Adafruit_SSD1306 display(LONGITUD, ALTURA, &Wire, -1);
+
+//SENSOR DE TEMPERATURA
+#define DHTPIN 23
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+float temp;
+float umbral = 24; //limite de temperatura
+
+void setup() 
+{
+  Serial.begin(115200);
+  Serial.println("Programa iniciado");
+
+  //Botones
+  pinMode(SW1, INPUT);
+  pinMode(SW2, INPUT);
+
+  //inicializa en sensor de temperatura
+  dht.begin(); 
+
+  //Display
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C); //inicializa el display
+}
+
+void loop() 
+{
+  //Se actualiza el reloj
+  timer = millis();
+
+  //Se lee la temperatura (en celcious)
+  temp = dht.readTemperature();
+
+  //Se leen los botones
+  val1 = digitalRead(SW1);
+  val2 = digitalRead(SW2);
+
+  switch (ESTADO) //INICIO DE MÁQUINA DE ESTADOS
+  {
+    case PANTALLA1:
+    display.clearDisplay(); //Se reinicia el display
+    display.setTextSize(2); //Establece el tamaño de texto
+    display.setTextColor(WHITE);
+    
+    display.setCursor(0, 10);
+    display.println("TEMP:");
+    display.setCursor(60, 10);
+    display.println(temp); //display de temperatura
+
+    display.setCursor(0, 50);
+    display.println("UMB:");
+    display.setCursor(60, 50);
+    display.println(umbral); //display de umbral
+
+    display.display(); //Muestra el display
+
+    //CAMBIO DE ESTADO
+    if (val1 == 0 && val2 == 0)
+    {
+      ESTADO = SOLTAR1;
+    }
+    break;
+
+
+    case SOLTAR1:
+    if (val1 == 1 && val2 == 1)
+    {
+      ESTADO = PANTALLA2;
+    }
+    break;
+
+    
+    case PANTALLA2:
+    display.clearDisplay(); //Se reinicia el display
+    display.setTextSize(2); //Establece el tamaño de texto
+    display.setTextColor(WHITE);
+    
+    display.setCursor(0, 10);
+    display.println("SETEAR CICLO"); //display de temperatura
+    display.setCursor(0, 40);
+    display.println(umbral); //display de umbral
+
+    display.display(); //Muestra el display
+
+    //CAMBIO DE ESTADO
+    if (val1 == 0) //cambiar a soltar sumar
+    {
+      ESTADO = SOLTAR_SUMAR;
+    }
+    if (val2 == 0) //cambiar a soltar restar
+    {
+      ESTADO = SOLTAR_RESTAR;
+    }
+    break;
+
+
+    case SOLTAR_SUMAR:
+    if (val1 == 1)
+    {
+      ESTADO = PANTALLA2;
+      //Sumar 30 a firebase
+    }
+
+    if (val2 == 0) //Comienzo de vuelta a pantalla1
+    {
+      ESTADO = SOLTAR2;
+    }
+    break;
+
+
+    case SOLTAR_RESTAR:
+    if (val2 == 1)
+    {
+      ESTADO = PANTALLA2;
+      //Restar 30 a firebase
+    }
+
+    if (val1 == 0) //Comienzo de vuelta a pantalla1
+    {
+      ESTADO = SOLTAR2;
+    }
+    break;
+
+
+    case SOLTAR2: //Regresar a pantalla 1 al soltar ambos botones
+    if (val1 == 1 && val2 == 1)
+    {
+      ESTADO = PANTALLA1;
+    }
+    break;
+}

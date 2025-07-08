@@ -21,9 +21,6 @@ int ESTADO = 1;
 #define SOLTAR_RESTAR 5
 #define SOLTAR2 6
 
-//TIMER
-unsigned long timer = 30000;
-
 //BOTONES
 #define SW1 34 //switch de aumento de horas
 int val1;
@@ -42,22 +39,27 @@ DHT dht(DHTPIN, DHTTYPE);
 float temp;
 float umbral = 24; //limite de temperatura
 
+//TIMER
+unsigned long timer = 0;
+unsigned long timer1000 = 30000;
+unsigned long timersegs = 1000;
+
 //TIEMPO
 int segs = 0;
 int mins = 0;
 int horas = 0;
 
-int GMTvariable = -3;
+int GMTvariable = -3;       //Desfasaje de GMT (luego se hace GMTvariable * 3600)
 int long gmtOffset_sec = 0; //ESTA VARIABLE VA A DICTAR EL DESFASAJE DE HORAS (comienza en -10800, lo cual es GMT-3, la hora Argentina)
 const int daylightOffset_sec = 0;
+unsigned long timestamp;   //El tiempo que se obtiene de internet
 
 //WIFI
-const char* ssid = "ORT-IoT";
-const char* password = "NuevaIOT$25";
-const char* ntpServer = "pool.ntp.org";
+const char* ssid = "MECA-IoT";
+const char* password = "IoT$2025";
+const char* ntpServer = "pool.ntp.org"; //El servidor de donde se extrae la hora
 
 unsigned long TiempoFirebase = 30000; //30s
-unsigned long timestamp;
 
 //FIREBASE
 #define Web_API_KEY "AIzaSyBSwN-5-gE6q-C40fdfLntIT9lXXuBDC0Q"
@@ -65,13 +67,18 @@ unsigned long timestamp;
 #define USER_EMAIL "48313738@est.ort.edu.ar"
 #define USER_PASS "FranMil1000"
 
+  //Seteo de Firebase
 WiFiClientSecure ssl_client;
 using AsyncClient = AsyncClientClass;
 AsyncClient aClient(ssl_client);
 FirebaseApp app;
 RealtimeDatabase Database;
+
+
 UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
-object_t jsonData, objUmbral, objTime;
+
+object_t jsonData, objTemp, objTime;
+
 JsonWriter writer;
 String uid;
 String databasePath;
@@ -105,7 +112,7 @@ void setup()
   Serial.println("WiFi conectado"); //Se manda al verificar que se logró establecer la conexión al wifi
 
   gmtOffset_sec = GMTvariable * 3600;
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer); 
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer); //Se configura la lectura de tiempo
 
   ssl_client.setInsecure();
   initializeApp(aClient, app, getAuth(user_auth), processData, "authTask");
@@ -132,11 +139,20 @@ void loop()
   val1 = digitalRead(SW1);
   val2 = digitalRead(SW2);
 
-  //Enviar a Firebase cada el intervalo
-  if (app.ready() && TiempoFirebase > timer)
+  //Interactuar con Firebase cada 30segs
+  if (app.ready() && timer > timer1000)
   {
-    TiempoFirebase = TiempoFirebase + 30000;
+    timer1000 = timer1000 + TiempoFirebase; //se crea una diferencia de TiempoFirebase, que no puede ser menor a 30000
     EnviarDatos();
+    LeerDatos();
+  }
+  //Contar segundos
+  if (timer > timer1000)
+  {
+    timer1000 = timer1000 + 1000
+    segs = segs + 1;
+    Serial.print("Segs");
+    Serial.println(segs);
   }
 
   switch (ESTADO) //INICIO DE MÁQUINA DE ESTADOS
@@ -182,7 +198,7 @@ void loop()
     display.setCursor(0, 10);
     display.println("SETEAR CICLO"); //display de temperatura
     display.setCursor(0, 40);
-    display.println(umbral); //display de umbral
+    display.println(TiempoFirebase); //display de delay de envío a FireBase
 
     display.display(); //Muestra el display
 
@@ -239,28 +255,28 @@ void loop()
     break;
 }
 
-//FUNCIONES
+//INICIO FUNCIONES
 
-void processData(AsyncResult &aResult)
+void processData(AsyncResult &aResult) 
 {
   if (!aResult.isResult()) return;
   if (aResult.isError())
   Firebase.printf("Error task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.error().message().c_str(), aResult.error().code());
 }
 
-void recibirtiempo()
+void recibirtiempo() //Funcion para recibir la hora de internet
 {
   struct tm timeinfo; //Se llama a la hora online
   
-  if (!getLocalTime(&timeinfo)) { //Se determina si la hora recibida es correcta
+  if (!getLocalTime(&timeinfo)) //Se determina si la hora recibida es correcta
+  {
     Serial.println("La hora no ha podido ser reconocida");
     return;
   }
 
-  //Este es el dato de tiempo que se enviará por FireBase
-  time_t now = mktime(&timeinfo);
-  timestamp = now;
-
+  //timestamp dato de tiempo que se enviará por FireBase
+  time_t timestamp = mktime(&timeinfo);
+  
   //Los valores recibidos se asignan a sus variables
   segs = timeinfo.tm_sec;
   mins = timeinfo.tm_min;
@@ -273,12 +289,66 @@ void recibirtiempo()
 void EnviarDatos() 
 {
   uid = app.getUid().c_str();
+
   databasePath = "/UsersData/" + uid + "/tempData";
   parentPath = databasePath + "/" + String(timestamp);
 
   writer.create(objTemp, "/temp", temp);
   writer.create(objTime, "/timestamp", timestamp);
+
   writer.join(jsonData, 2, objUmbral, objTemp);
 
-  Database.set<object_t>(aClient, parentPath, jsonData, processData, "RTDB_Umbral");
+  Database.set<object_t>(aClient, parentPath, jsonData, processData, "Guardado_1");
+}
+
+void LeerDatos() 
+{
+  uid = app.getUid().c_str();
+
+  // Ruta a los datos de temperatura del usuario
+  String path = "/UsersData/" + uid + "/tempData";
+
+  // Lectura del nodo principal de datos de temperatura
+  Database.get(aClient, path, processData, [&](AsyncResult &aResult) {
+    if (!aResult.isResult()) return;
+
+    if (aResult.isError()) {
+      Firebase.printf("Error al leer datos: %s\n", aResult.error().message().c_str());
+      return;
+    }
+
+    FirebaseJson json = aResult.to<FirebaseJson>();
+
+    // Obtener la clave (timestamp más reciente)
+    String ultimaClave;
+    json.getKeys().sort().rbegin()->toString(ultimaClave);
+
+    // Ruta al nodo más reciente
+    String nodoReciente = path + "/" + ultimaClave;
+
+    // Leer los datos del nodo más reciente
+    Database.get(aClient, nodoReciente, processData, [&](AsyncResult &res) 
+    {
+      
+      if (!res.isResult()) return;
+      if (res.isError()) 
+      {
+        Firebase.printf("Error al leer nodo más reciente: %s\n", res.error().message().c_str());
+        return;
+      }
+
+      FirebaseJson data = res.to<FirebaseJson>();
+
+      float tempFirebase;
+      unsigned long timestampFirebase;
+
+      data.get("temp", tempFirebase);
+      data.get("timestamp", timestampFirebase);
+
+      Serial.print("TEMP_FIREBASE: ");
+      Serial.println(tempFirebase);
+      Serial.print("TIMESTAMP_FIREBASE: ");
+      Serial.println(timestampFirebase);
+    });
+  });
 }

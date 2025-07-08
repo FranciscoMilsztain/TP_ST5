@@ -8,6 +8,9 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <DHT.h>
+#include <WiFi.h>
+#include <FirebaseClient.h>
+#include "time.h"
 
 //ESTADOS
 int ESTADO = 1;
@@ -19,9 +22,7 @@ int ESTADO = 1;
 #define SOLTAR2 6
 
 //TIMER
-unsigned long timer;
-unsigned long timer1000;
-int segs;
+unsigned long timer = 30000;
 
 //BOTONES
 #define SW1 34 //switch de aumento de horas
@@ -41,6 +42,42 @@ DHT dht(DHTPIN, DHTTYPE);
 float temp;
 float umbral = 24; //limite de temperatura
 
+//TIEMPO
+int segs = 0;
+int mins = 0;
+int horas = 0;
+
+int GMTvariable = -3;
+int long gmtOffset_sec = 0; //ESTA VARIABLE VA A DICTAR EL DESFASAJE DE HORAS (comienza en -10800, lo cual es GMT-3, la hora Argentina)
+const int daylightOffset_sec = 0;
+
+//WIFI
+const char* ssid = "ORT-IoT";
+const char* password = "NuevaIOT$25";
+const char* ntpServer = "pool.ntp.org";
+
+unsigned long TiempoFirebase = 30000; //30s
+unsigned long timestamp;
+
+//FIREBASE
+#define Web_API_KEY "AIzaSyBSwN-5-gE6q-C40fdfLntIT9lXXuBDC0Q"
+#define DATABASE_URL "https://esp32umbral-default-rtdb.firebaseio.com/"
+#define USER_EMAIL "48313738@est.ort.edu.ar"
+#define USER_PASS "FranMil1000"
+
+WiFiClientSecure ssl_client;
+using AsyncClient = AsyncClientClass;
+AsyncClient aClient(ssl_client);
+FirebaseApp app;
+RealtimeDatabase Database;
+UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
+object_t jsonData, objUmbral, objTime;
+JsonWriter writer;
+String uid;
+String databasePath;
+String parentPath;
+
+
 void setup() 
 {
   Serial.begin(115200);
@@ -55,6 +92,25 @@ void setup()
 
   //Display
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C); //inicializa el display
+
+  //Conexión al wifi
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  client.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
+  while (WiFi.status() != WL_CONNECTED) 
+  {
+    delay(500);
+    Serial.print("-"); //Se manda indefinidamente si no se logra establecer la conexión al wifi
+  }
+  Serial.println("WiFi conectado"); //Se manda al verificar que se logró establecer la conexión al wifi
+
+  gmtOffset_sec = GMTvariable * 3600;
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer); 
+
+  ssl_client.setInsecure();
+  initializeApp(aClient, app, getAuth(user_auth), processData, "authTask");
+  app.getApp<RealtimeDatabase>(Database);
+  Database.url(DATABASE_URL);
 }
 
 void loop() 
@@ -62,16 +118,25 @@ void loop()
   //Se actualiza el reloj
   timer = millis();
 
+  //Se llama a la funcion recibirtiempo (Recbie el tiempo de internet)
+  recibirtiempo();
+
   //Se lee la temperatura (en celcious)
-  temp = dht.readTemperature();
+  temp = dht.readTemperature();  
+  if (temp > umbral)
+  {
+    Serial.println("La temperatura supero al umbral");
+  }
 
   //Se leen los botones
   val1 = digitalRead(SW1);
   val2 = digitalRead(SW2);
 
-  if (temp > umbral)
+  //Enviar a Firebase cada el intervalo
+  if (app.ready() && TiempoFirebase > timer)
   {
-    Serial.println("La temperatura supero al umbral");
+    TiempoFirebase = TiempoFirebase + 30000;
+    EnviarDatos();
   }
 
   switch (ESTADO) //INICIO DE MÁQUINA DE ESTADOS
@@ -138,6 +203,7 @@ void loop()
     {
       ESTADO = PANTALLA2;
       //Sumar 30 a firebase
+      TiempoFirebase = TiempoFirebase + 30000;
     }
 
     if (val2 == 0) //Comienzo de vuelta a pantalla1
@@ -152,6 +218,10 @@ void loop()
     {
       ESTADO = PANTALLA2;
       //Restar 30 a firebase
+      if (TiempoFirebase > 30000)
+      {
+        TiempoFirebase = TiempoFirebase - 30000;
+      }
     }
 
     if (val1 == 0) //Comienzo de vuelta a pantalla1
@@ -167,4 +237,48 @@ void loop()
       ESTADO = PANTALLA1;
     }
     break;
+}
+
+//FUNCIONES
+
+void processData(AsyncResult &aResult)
+{
+  if (!aResult.isResult()) return;
+  if (aResult.isError())
+  Firebase.printf("Error task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.error().message().c_str(), aResult.error().code());
+}
+
+void recibirtiempo()
+{
+  struct tm timeinfo; //Se llama a la hora online
+  
+  if (!getLocalTime(&timeinfo)) { //Se determina si la hora recibida es correcta
+    Serial.println("La hora no ha podido ser reconocida");
+    return;
+  }
+
+  //Este es el dato de tiempo que se enviará por FireBase
+  time_t now = mktime(&timeinfo);
+  timestamp = now;
+
+  //Los valores recibidos se asignan a sus variables
+  segs = timeinfo.tm_sec;
+  mins = timeinfo.tm_min;
+  horas = timeinfo.tm_hour;
+
+  // Mostrar
+  Serial.printf("Hora actual: %02d:%02d:%02d\n", horas, mins, segs);
+}
+
+void EnviarDatos() 
+{
+  uid = app.getUid().c_str();
+  databasePath = "/UsersData/" + uid + "/tempData";
+  parentPath = databasePath + "/" + String(timestamp);
+
+  writer.create(objTemp, "/temp", temp);
+  writer.create(objTime, "/timestamp", timestamp);
+  writer.join(jsonData, 2, objUmbral, objTemp);
+
+  Database.set<object_t>(aClient, parentPath, jsonData, processData, "RTDB_Umbral");
 }

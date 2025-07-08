@@ -103,7 +103,7 @@ void setup()
   //Conexión al wifi
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  client.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
+
   while (WiFi.status() != WL_CONNECTED) 
   {
     delay(500);
@@ -149,7 +149,7 @@ void loop()
   //Contar segundos
   if (timer > timer1000)
   {
-    timer1000 = timer1000 + 1000
+    timer1000 = timer1000 + 1000;
     segs = segs + 1;
     Serial.print("Segs");
     Serial.println(segs);
@@ -253,6 +253,7 @@ void loop()
       ESTADO = PANTALLA1;
     }
     break;
+  }
 }
 
 //INICIO FUNCIONES
@@ -296,7 +297,7 @@ void EnviarDatos()
   writer.create(objTemp, "/temp", temp);
   writer.create(objTime, "/timestamp", timestamp);
 
-  writer.join(jsonData, 2, objUmbral, objTemp);
+  writer.join(jsonData, 2, objTime, objTemp);
 
   Database.set<object_t>(aClient, parentPath, jsonData, processData, "Guardado_1");
 }
